@@ -182,6 +182,18 @@ class PE(Component):
         else:
             print(f"PE '{self.name}' 仍有工作未完成")
 
+    def add(self, index: int, text: str, color: RGBColor = None):
+        """
+        將資料 (text, color) 寫入指定索引的 PE 單元
+        """
+        # if self.ready():
+        # for index in range(self.PE_num):
+        # if self.cnt[index] == 0:
+        self.data[index].append((text, color))
+        # break
+        # else:
+        #     print(f"PE '{self.name}' 仍有工作未完成")
+
     def count(self):
         self.cnt = [x - 1 if x > 0 else x for x in self.cnt]
 
@@ -407,13 +419,13 @@ class SRAM(Component):
         self,
         row: int,
         col: int,
-        # --- 修改這裡 (型別提示) ---
         left: Cm,
         top: Cm,
         width: Cm,
         height: Cm,
         interleave: bool = False,
         bottom_start: bool = True,
+        ptr: dict = {},
     ):
         self.row = row
         self.col = col
@@ -423,6 +435,7 @@ class SRAM(Component):
         self.height = height
         self.interleave = interleave  # 是否啟用帶狀欄
         self.bottom_start = bottom_start  # 座標是否從底部開始計算
+        self.ptr = ptr
 
         # 將 data store 改為儲存 (text, color) 的元組 (tuple)
         self.data = [
@@ -499,7 +512,11 @@ class SRAM(Component):
                     table.cell(ii, j).fill.fore_color.rgb = RGBColor(0, 255, 0)
                     self.data[i][j] = data, color, ""
 
+        self.render_pointer(slide)
         self.render_data(slide)
+
+    def ptr_value(self, name: str, col: int):
+        return self.ptr[name]["i"] * col + self.ptr[name]["j"]
 
     def write(self, i: int, j: int, text: str, color: RGBColor = None):
         """
@@ -510,6 +527,10 @@ class SRAM(Component):
             self.data[i][j] = (text, color, "w")
         else:
             print(f"SRAM write 錯誤: 索引 ({i}, {j}) 超出範圍")
+
+    def set_ptr(self, name: str, i: int, j: int):
+        self.ptr[name][i] = i
+        self.ptr[name][j] = j
 
     def read(self, i: int, j: int):
         """
@@ -523,6 +544,29 @@ class SRAM(Component):
         else:
             print(f"SRAM read 錯誤: 索引 ({i}, {j}) 超出範圍")
             return None, None
+
+    def render_pointer(self, slide: pptx.slide.Slide):
+        if slide is None:
+            print("SRAM 錯誤: 必須先呼叫 .add(slide) 才能 render_data")
+            return
+
+        cell_width = self.width / self.col
+        cell_height = self.height / self.row
+
+        for ptr in self.ptr.values():
+            x, y = self.get_position(ptr["i"], ptr["j"])
+
+            ar = slide.shapes.add_shape(
+                MSO_AUTO_SHAPE_TYPE.UP_ARROW,
+                x,
+                y + cell_height,
+                cell_width,
+                cell_height / 2,
+            )
+            ar.line.width = Pt(0)
+            ar.fill.solid()
+            ar.fill.fore_color.rgb = ptr["color"]
+            ar.shadow.inherit = False
 
     def render_data(self, slide: pptx.slide.Slide):
         """
