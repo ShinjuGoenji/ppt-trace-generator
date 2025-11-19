@@ -110,6 +110,7 @@ def main_logic(prs: pptx.presentation.Presentation):
 
         sram_write = []
         mod_small_unsigned_write = []
+        add_mul_small_write = []
         write_buffer_write = []
 
         # inputs
@@ -151,9 +152,7 @@ def main_logic(prs: pptx.presentation.Presentation):
                         w_flag_1.flag = True
             else:
                 if add_mul_small.ready() and add_mul_small_ptr == input_cnt:
-                    add_mul_small.write(
-                        text=input_data, color=input_color, cnt=(3 + u + 1)
-                    )
+                    add_mul_small_write.append((input_data, (3 + u + 1), input_color))
                 else:
                     sram_write.append((u, v, input_data, input_color))
                     if v % 2 == 0:
@@ -185,7 +184,11 @@ def main_logic(prs: pptx.presentation.Presentation):
             write_buffer_ptr[1] -= 1
 
         for k, data in enumerate(mod_small_unsigned.data):
-            text = data[0]
+
+            if len(data) == 0:
+                continue
+
+            text, color = data[0]
 
             if text == "" or mod_small_unsigned.cnt[k] > 0:
                 continue
@@ -210,13 +213,16 @@ def main_logic(prs: pptx.presentation.Presentation):
                 else:
                     sram_write.append((i, j, text, COLORS["YELLOW"]))
                     w_flag_1.flag = True
-            mod_small_unsigned.data[k] = ("", RGBColor(0, 0, 0))
+            mod_small_unsigned.data[k].pop(0)
 
         for k in sram_write:
             sram.write(*k)
         for k in mod_small_unsigned_write:
             mod_small_unsigned.write(*k)
             mod_small_unsigned_ptr += 1
+        for k in add_mul_small_write:
+            add_mul_small.write(*k)
+            add_mul_small_ptr += 1
         for k in write_buffer_write:
             write_buffer.write(*k)
 

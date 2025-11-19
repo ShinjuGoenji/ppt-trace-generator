@@ -166,20 +166,18 @@ class PE(Component):
         self.height = height
         self.PE_num = PE_num
 
-        # 儲存 (text, color) 的元組 (tuple)
-        self.data = [("", RGBColor(0, 0, 0)) for _ in range(PE_num)]
+        self.data = [[] for _ in range(PE_num)]
         self.cnt = [0 for _ in range(PE_num)]
 
     def write(self, text: str, cnt: int, color: RGBColor = None):
         """
         將資料 (text, color) 寫入指定索引的 PE 單元
-        index 為 0-based
         """
         if self.ready():
             for index in range(self.PE_num):
                 if self.cnt[index] == 0:
                     self.cnt[index] = cnt
-                    self.data[index] = (text, color)
+                    self.data[index].append((text, color))
                     break
         else:
             print(f"PE '{self.name}' 仍有工作未完成")
@@ -193,10 +191,11 @@ class PE(Component):
     def render(self, slide: pptx.slide.Slide):
         shapes = slide.shapes
 
-        # 用來收集需要群組的形狀 (背景結構)
-        shapes_to_group = []
-        shapes_to_group_ = []
-        # 用來收集不需要群組的形狀 (Data 文字)
+        # 用來收集需要群組的形狀
+        shapes_to_group = []  # 背景結構 (外框、標題、圓形)
+        shapes_to_group_ = []  # 計數器 (紅色數字)
+
+        # 用來收集不需要群組的形狀 (Data 文字)，確保它們在最上層
         data_shapes = []
 
         # 1. 繪製最外層的圓角黑框長方形
@@ -277,9 +276,13 @@ class PE(Component):
                     circle_shape.line.width = Pt(1)
                     shapes_to_group.append(circle_shape)
 
-                    # 4.2 Data 文字 (不加入群組 -> 放入 data_shapes)
-                    text, color = self.data[pe_index]
-                    if text:
+                    # 4.2 Data 文字 (處理多筆資料)
+                    data_list = self.data[pe_index]  # 這現在是一個 List
+
+                    # 過濾掉空的資料 (如果有的話)
+                    valid_items = [d for d in data_list if d[0]]
+
+                    if valid_items:
                         tb = shapes.add_textbox(
                             circle_left, circle_top, circle_dia, circle_dia
                         )
@@ -290,19 +293,33 @@ class PE(Component):
                         tf.margin_right = Cm(0)
                         tf.word_wrap = False
                         tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+
+                        # 處理第一筆資料 (使用預設的第一個段落，避免空行)
+                        first_text, first_color = valid_items[0]
                         p = tf.paragraphs[0]
                         p.alignment = PP_ALIGN.CENTER
-                        p.text = text
+                        p.text = str(first_text)
                         p.font.name = "Tahoma"
                         p.font.size = Pt(12)
                         p.font.bold = True
-                        if color:
-                            p.font.color.rgb = color
+                        if first_color:
+                            p.font.color.rgb = first_color
+
+                        # 處理後續資料 (新增段落)
+                        for text, color in valid_items[1:]:
+                            p = tf.add_paragraph()
+                            p.alignment = PP_ALIGN.CENTER
+                            p.text = str(text)
+                            p.font.name = "Tahoma"
+                            p.font.size = Pt(12)
+                            p.font.bold = True
+                            if color:
+                                p.font.color.rgb = color
 
                         # 關鍵：收集到 data_shapes
                         data_shapes.append(tb)
 
-                    # 4.3 計數器 (加入群組)
+                    # 4.3 計數器 (加入第二群組)
                     cnt_val = self.cnt[pe_index]
                     if cnt_val >= 0:
                         cnt_box_size = circle_dia * 0.5
@@ -336,39 +353,30 @@ class PE(Component):
         self.group_shapes(slide, shapes_to_group_)
 
         # 6. 修正圖層順序 (Z-Order)
-        # 由於群組操作會產生新的 GroupShape 並放在最上層，
-        # 我們必須確保 Data 文字方塊 (data_shapes) 移到比群組更上層的位置
         self.bring_to_front(slide, data_shapes)
 
     def group_shapes(self, slide, shapes_to_group):
         """
         使用 XML 操作將指定的 shapes 列表組合成一個 PowerPoint Group Shape。
-        注意：這是 python-pptx 的非官方 workaround。
         """
         if not shapes_to_group:
             return
 
-        # 取得投影片的形狀樹 (spTree)
         spTree = slide.shapes._spTree
-
-        # 建立群組元素 <p:grpSp>
         grpSp = OxmlElement("p:grpSp")
 
-        # 設定群組的非視覺屬性 (nvGrpSpPr)
         nvGrpSpPr = OxmlElement("p:nvGrpSpPr")
         cNvPr = OxmlElement("p:cNvPr")
-        cNvPr.set("id", "1")  # ID 隨意，PPT 會自動修正
-        cNvPr.set("name", f"{self.name}_Group")  # 設定群組名稱
+        cNvPr.set("id", "1")
+        cNvPr.set("name", f"{self.name}_Group")
         nvGrpSpPr.append(cNvPr)
         nvGrpSpPr.append(OxmlElement("p:cNvGrpSpPr"))
         nvGrpSpPr.append(OxmlElement("p:nvPr"))
         grpSp.append(nvGrpSpPr)
 
-        # 設定群組屬性 (grpSpPr) 與座標轉換 (xfrm)
         grpSpPr = OxmlElement("p:grpSpPr")
         xfrm = OxmlElement("a:xfrm")
 
-        # 設定群組座標原點與大小 (這裡設為 0，並透過 chOff/chExt 對應，讓子形狀維持絕對座標)
         for tag in ["a:off", "a:ext", "a:chOff", "a:chExt"]:
             elem = OxmlElement(tag)
             elem.set("x" if "off" in tag.lower() else "cx", "0")
@@ -378,18 +386,15 @@ class PE(Component):
         grpSpPr.append(xfrm)
         grpSp.append(grpSpPr)
 
-        # 將形狀從 spTree 移動到 grpSp
         for shape in shapes_to_group:
-            spTree.remove(shape.element)  # 從投影片移除
-            grpSp.append(shape.element)  # 加入群組
+            spTree.remove(shape.element)
+            grpSp.append(shape.element)
 
-        # 將群組加入投影片
         spTree.append(grpSp)
 
     def bring_to_front(self, slide, shapes):
         """
-        將指定的形狀移到最上層 (Z-Order Top)
-        原理：從 spTree 移除後重新 Append 到最後
+        將指定的形狀移到最上層
         """
         spTree = slide.shapes._spTree
         for shape in shapes:
